@@ -110,7 +110,7 @@ void initEpaper(void){
 
     //may need pull down resistor on the Busy pin, and pull up on the RESET
 
-    //TODO: prescaler if too fast for display
+    //TODO: prescaler if too fast for display, the waveshare code transmits at 2Mhz
     //EUSCI_B3->BRW |= 1; // default reset value is 0... odd.
 
     EUSCI_B3_SPI->CTLW0 &= ~UCSWRST; // set to a 0 lock
