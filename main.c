@@ -57,10 +57,10 @@ void main(void)
 	uint16_t i = 0;
 
 	while(1){
-	sendCommand(0xAA);
-	for(i = 0; i< 200; i++);
-	sendData(0xBB);
-    for(i = 0; i< 200; i++);
+	//sendCommand(0xAA);
+	//for(i = 0; i< 200; i++);
+	//sendData(0xBB);
+   // for(i = 0; i< 200; i++);
 	}
 
 }
@@ -125,19 +125,19 @@ void initEpaper(void){
     //Panel Reset
     uint16_t delay = 0;
     P7OUT &=~BIT1;
-    for(delay = 0; delay < 30; delay++);
+    for(delay = 0; delay < 6000; delay++);
     P7OUT |= BIT1;
-    for(delay = 0; delay < 30; delay++); //double check with LA to see if equal or greater than 10mS
+    for(delay = 0; delay < 6000; delay++); //double check with LA to see if equal or greater than 10mS
 
     //Gate number and scan order setting
     sendCommand(CMD_DRIVER_OUTPUT_CONTROL);
-    SendData((LCD_VERTICAL_MAX - 1) & 0xFF); // Thanks Yehui from Waveshare!
-    SendData(((LCD_HORIZONTAL_MAX - 1) >> 8) & 0xFF);// Thanks Yehui from Waveshare!
+    sendData((LCD_VERTICAL_MAX - 1) & 0xFF); // Thanks Yehui from Waveshare!
+    sendData(((LCD_HORIZONTAL_MAX - 1) >> 8) & 0xFF);// Thanks Yehui from Waveshare!
     sendCommand(0x00);
     //set scan frequency 50hz
-    sendCommand(0x3A); //dummy line wdith
+    sendCommand(CMD_DUMMY_LINE); //dummy line wdith
     sendData(0x1B); // default value
-    sendCommand(0x3B);
+    sendCommand(CMD_GATE_TIME);
     sendData(0x0B); //default value
     //data entry sequence (y-, x+)/// oof that is gonna trip up my brain
    sendCommand(CMD_DATA_ENTRY);
@@ -146,7 +146,7 @@ void initEpaper(void){
    //look on section 8.3 of the IL3820 datasheet shows a diagram of the way data is written
    sendCommand(CMD_X_ADDR_START);
    sendData(0x00);
-   sendData(0x18) //specified in the data sheet, interesting, so 200/8 is 25_base10, but 0x19... and 0 to 0x18 is 24
+   sendData(0x18); //specified in the data sheet, interesting, so 200/8 is 25_base10, but 0x19... and 0 to 0x18 is 24
    //set ram Y start end
    sendCommand(CMD_Y_ADDR_START);
    sendData(0xC7); //199 because 0 to 199 is 200 points //oh! because a row is 1 pixel and we have 200 rows?
@@ -174,7 +174,7 @@ void initEpaper(void){
    //image data download!
    sendCommand(CMD_WRITE_RAM);
    uint16_t fillBlankCount = 0;
-   for(fillBlankCount = 0; fillBlankCount < 5000; fillBlankCount++){
+   for(fillBlankCount = 0; fillBlankCount < 2000; fillBlankCount++){
        sendData(WHITE);
    }
 
@@ -221,19 +221,4 @@ void EUSCIB3_IRQHandler(void)
 }
 
 
-const unsigned char lut_full_update[] =
-{
-    0x02, 0x02, 0x01, 0x11, 0x12, 0x12, 0x22, 0x22,
-    0x66, 0x69, 0x69, 0x59, 0x58, 0x99, 0x99, 0x88,
-    0x00, 0x00, 0x00, 0x00, 0xF8, 0xB4, 0x13, 0x51,
-    0x35, 0x51, 0x51, 0x19, 0x01, 0x00
-};
-
-const unsigned char lut_partial_update[] =
-{
-    0x10, 0x18, 0x18, 0x08, 0x18, 0x18, 0x08, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x13, 0x14, 0x44, 0x12,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-};
 
