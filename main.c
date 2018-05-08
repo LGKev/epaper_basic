@@ -1,6 +1,6 @@
 
 #include "msp.h"
-
+#include "ePaper.h"
 
 /*
  * main.c
@@ -58,9 +58,9 @@ void main(void)
 
 	while(1){
 	sendCommand(0xAA);
-	for(i = 0; i< 1000; i++);
+	for(i = 0; i< 200; i++);
 	sendData(0xBB);
-    for(i = 0; i< 1000; i++);
+    for(i = 0; i< 200; i++);
 	}
 
 }
@@ -104,8 +104,9 @@ void initEpaper(void){
     P7DIR |= BIT1;
     P10DIR |= BIT0 | BIT1 | BIT2 | BIT3;
 
-    P10OUT &= ~(BIT0 | BIT1 | BIT2 | BIT3); // SET ALL TO LOW
-    P7OUT &= ~(BIT1 | BIT7);
+    P10OUT |= (BIT0 | BIT1 | BIT2 | BIT3); // set all high according to data sheet 21/29 good display
+    P7OUT &= ~(BIT2);   //busy is active high!
+    P7OUT |= (BIT1);      //reset is active low!
 
     //may need pull down resistor on the Busy pin, and pull up on the RESET
 
@@ -118,11 +119,84 @@ void initEpaper(void){
     EUSCI_B3_SPI ->IFG = 0;     //clear any interrupts
     EUSCI_B3_SPI -> IE |= UCTXIE;
 
-    NVIC_EnableIRQ(EUSCIB0_IRQn);
+    NVIC_EnableIRQ(EUSCIB3_IRQn);
+
+
+    //Panel Reset
+    uint16_t delay = 0;
+    P7OUT &=~BIT1;
+    for(delay = 0; delay < 30; delay++);
+    P7OUT |= BIT1;
+    for(delay = 0; delay < 30; delay++); //double check with LA to see if equal or greater than 10mS
+
+    //Gate number and scan order setting
+    sendCommand(CMD_DRIVER_OUTPUT_CONTROL);
+    SendData((LCD_VERTICAL_MAX - 1) & 0xFF); // Thanks Yehui from Waveshare!
+    SendData(((LCD_HORIZONTAL_MAX - 1) >> 8) & 0xFF);// Thanks Yehui from Waveshare!
+    sendCommand(0x00);
+    //set scan frequency 50hz
+    sendCommand(0x3A); //dummy line wdith
+    sendData(0x1B); // default value
+    sendCommand(0x3B);
+    sendData(0x0B); //default value
+    //data entry sequence (y-, x+)/// oof that is gonna trip up my brain
+   sendCommand(CMD_DATA_ENTRY);
+   sendData(0x01); // note: what would change when we make this bot y+ x+ where would origin be
+   //set ram X start/end
+   //look on section 8.3 of the IL3820 datasheet shows a diagram of the way data is written
+   sendCommand(CMD_X_ADDR_START);
+   sendData(0x00);
+   sendData(0x18) //specified in the data sheet, interesting, so 200/8 is 25_base10, but 0x19... and 0 to 0x18 is 24
+   //set ram Y start end
+   sendCommand(CMD_Y_ADDR_START);
+   sendData(0xC7); //199 because 0 to 199 is 200 points //oh! because a row is 1 pixel and we have 200 rows?
+   sendData(0x00); //why not 25 row?
+   sendData(0x00);
+   sendData(0x00); //might be one extra, but specified in the datasheet
+
+   //vcom setting
+   sendCommand(CMD_VCOM);
+   sendData(0xA8); // Thanks Yehui from Waveshare!
+   //wavfrom setting
+   sendCommand(CMD_WRITE_LUT);
+   uint8_t lutCount = 0;
+   for(lutCount = 0; lutCount < 30; lutCount++){
+       sendData(lut_full_update[lutCount]);
+   }
+//set ramX address counter
+   sendCommand(CMD_X_COUNTER);
+   sendData(0x00); //note: from datasheet
+//set ramY address counter\
+   sendCommand(CMD_Y_COUNTER);
+   sendData(0xC7); // note from datasheet
+   sendData(0x00);
+
+   //image data download!
+   sendCommand(CMD_WRITE_RAM);
+   uint16_t fillBlankCount = 0;
+   for(fillBlankCount = 0; fillBlankCount < 5000; fillBlankCount++){
+       sendData(WHITE);
+   }
+
+   //display update sequence setting: use waveform from ram
+   sendCommand(CMD_DISPLAY_UPDATE_CTRL2); //note from datasheet
+   sendData(0xC7);
+
+   //image update
+   sendCommand(CMD_MASTER_ACTV);
+
+   //wait until not busy, or when busy pin goes LOW
+   while(P7IN&BIT2);
+   sendCommand(CMD_DEEP_SLEEP);
+   sendData(0x01); //note specified by datasheet
+
+
+
 }
 #endif
 
 void sendCommand(uint8_t command){
+    while(EUSCI_B3_SPI->IFG & UCTXIFG);
     P10OUT &= ~BIT0;     // D/C
     P10OUT &= ~BIT3;     // CS
     EUSCI_B3_SPI->TXBUF = command;
@@ -130,11 +204,36 @@ void sendCommand(uint8_t command){
 }
 
 void sendData(uint8_t data){
+    while(EUSCI_B3_SPI->IFG & UCTXIFG);
     P10OUT |=   BIT0;     // D/C
     P10OUT &= ~BIT3;     // CS
     EUSCI_B3_SPI->TXBUF = data;
     P10OUT |= BIT3;
-
 }
 
+/**/
+
+void EUSCIB3_IRQHandler(void)
+{
+    if(EUSCI_B3_SPI->IFG & EUSCI_B_IFG_TXIFG){
+        EUSCI_B3_SPI->IFG &=~ EUSCI_B_IFG_TXIFG;
+    }
+}
+
+
+const unsigned char lut_full_update[] =
+{
+    0x02, 0x02, 0x01, 0x11, 0x12, 0x12, 0x22, 0x22,
+    0x66, 0x69, 0x69, 0x59, 0x58, 0x99, 0x99, 0x88,
+    0x00, 0x00, 0x00, 0x00, 0xF8, 0xB4, 0x13, 0x51,
+    0x35, 0x51, 0x51, 0x19, 0x01, 0x00
+};
+
+const unsigned char lut_partial_update[] =
+{
+    0x10, 0x18, 0x18, 0x08, 0x18, 0x18, 0x08, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x13, 0x14, 0x44, 0x12,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
 
