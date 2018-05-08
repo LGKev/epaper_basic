@@ -43,7 +43,7 @@
 *.pdb
 
 #CCS files
-epaper_basic\Debug
+epaper_basic/Debug
 
 # Kernel Module Compile Results
 *.mod*
