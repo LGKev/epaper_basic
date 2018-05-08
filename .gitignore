@@ -42,6 +42,9 @@
 *.idb
 *.pdb
 
+#CCS files
+epaper_basic\Debug
+
 # Kernel Module Compile Results
 *.mod*
 *.cmd
