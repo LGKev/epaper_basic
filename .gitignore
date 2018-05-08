@@ -48,6 +48,12 @@ epaper_basic/Debug
 startup_msp432p401r_ccs.c
 epaper_basic/targetConfigs
 system_msp432p401r.c
+*.settings/org.eclipse.cdt.codan.core.prefs
+*.settings/org.eclipse.cdt.debug.core.prefs
+._.csproject
+.ccsproject
+.cproject
+
 
 # Kernel Module Compile Results
 *.mod*
