@@ -44,6 +44,10 @@
 
 #CCS files
 epaper_basic/Debug
+*.project
+startup_msp432p401r_ccs.c
+epaper_basic/targetConfigs
+system_msp432p401r.c
 
 # Kernel Module Compile Results
 *.mod*
