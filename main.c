@@ -14,31 +14,97 @@
 
 
 /*
- * @brief: initEpaper will initialize GPIO and the SPI Pins to communicate to the ePaper Display.
- * The SPI Pins are configured for Primary mode. Because of the hardware on the PCB STE will not be used, but
- * manual GPIO toggling will be required for the CS pin.
+ * @name: initEpaper
+ * @brief: will initialize GPIO and the SPI Pins to communicate to the ePaper Display.
+ *              The SPI Pins are configured for Primary mode.
  * */
-void initEpaper();
+void initEpaper(void);
 
+/*
+ * @name: sendCommand(byte command)
+ * @brief: Sends a command byte to the ePaper
+ *              - toggles the CS pin to be low
+ *              - sets the command pin to low
+ * @inputs: a valid command found in the data sheet and the header file
+ * */
+void sendCommand(byte);
 
+/*
+ * @name: sendData(byte data)
+ * @brief: Sends a command byte to the ePaper
+ *              - toggles the CS pin to be low
+ *              - sets the command pin to HIGH
+ * @inputs: send bytes of data to the ePaper
+ *
+ * This is better suited for a single data byte instead of multiple say for instance you had to send the LUT
+ * this would not work because CS would be toggling between transmits.
+     TODO if this proves not correct to initialize the screen I will come back and make one where data is transmitted and CS stays low the entire time
+     // looking at other examples of the driver it looks like some keep CS low the entire data transfer of LUT and others don't, ie let it toggle.
+*/
 
 
 
 void main(void)
 {
 	WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;		// stop watchdog timer
+
+	__enable_interrupts();
 }
 
 #define LAUNCHPAD_FW
 #ifdef LAUNCHPAD_FW
 /*
  *  Port 10 for the launchpad
- *  GPIO    10.0        =        Data Command pin, Data is HIGH     == Green Ch5 on Logic Analyzer
- *  GPIO    10.1        =        SCK        ==          yellow wire connected to channel 3 on Logic Analyzer
- *  GPIO    10.2        =       MISO        ==      BLUE - logic analyzer Ch. 8
- *  GPIO    10.3        =       CS      ==  YELLO, channel 3 on Logic analyzer
+ *  GPIO    10.0        =        Data Command pin, Data is HIGH     == Green Ch5 on Logic Analyzer (LA)
+ *  PRIMARY    10.1        =        SCK        ==          yellow wire connected to channel 3 on Logic Analyzer
+ *  PRIMARY    10.2        =       MISO        ==      BLUE - logic analyzer Ch. 8
+ *  GPIO    10.3        =       CS      ==  ORANGE, channel 4 on Logic analyzer
+ *
+ *  GPIO 7.1    =   ePaper RESET    =   WHITE, CH7 LA //NOTE active LOW
+ *  GPIO 7.2    = ePaper BUSY        =  PURPLE, CH4   //NOTE active HIGH
+ *
+ *  SPI module on UCB3
+ *  Polarity: rising edge
+ *  clock is low when idle
+ *  master only, and STE is not used
  * */
 void initEpaper(void){
 
+    EUSCI_B3_SPI->CTLW0 |= UCSWRST; // set to a 1, unlock
+    EUSCI_B3_SPI->CTLW0 &= ~(UCCKPH | UCCKPL | UC7BIT | UCMODE0   ); // polarity:0, phase:0, 8 bits, spi mode (vs i2c)
+    EUSCI_B3_SPI->CTLW0 |= (UCMSB | UCMST |  UCSYNC | UCSSEL__SMCLK); // MSB, master, sync (vs uart), system clock : 3Mhz
+
+    //configure the pins
+    P7SEL0 &=~(BIT1 | BIT2);        // busy and reset
+    P7SEL1  &= ~(BIT1 | BIT2);
+
+    P10SEL0 &=~(BIT0 | BIT3); // D/C and CS
+    P10SEL1 &=~(BIT0 | BIT3);
+
+    P10SEL0 |= (BIT1 | BIT2); //primary mode for MISO and SCK
+    P10SEL1 &= ~(BIT1 | BIT2);
+
+    P7DIR &= ~(BIT2); //busy is an input
+    P7DIR |= BIT1;
+    P10DIR |= BIT0 | BIT1 | BIT2 | BIT3;
+
+    P10OUT &= ~(BIT0 | BIT1 | BIT2 | BIT3); // SET ALL TO LOW
+    P7OUT &= ~(BIT1 | BIT7);
+
+    //may need pull down resistor on the Busy pin, and pull up on the RESET
+
+    //TODO: prescaler if too fast for display
+    //EUSCI_B3->BRW |= 1; // default reset value is 0... odd.
+
+    EUSCI_B3_SPI->CTLW0 &= ~UCSWRST; // set to a 0 lock
+
+    //enable interrupt for the TX
+    EUSCI_B3_SPI ->IFG = 0;     //clear any interrupts
+    EUSCI_B3_SPI -> IE |= UCTXIE;
+
+    NVIC_EnableIRQ(EUSCIB0_IRQn);
 }
 #endif
+
+
+
