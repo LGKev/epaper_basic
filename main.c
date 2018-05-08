@@ -27,7 +27,9 @@ void initEpaper(void);
  *              - sets the command pin to low
  * @inputs: a valid command found in the data sheet and the header file
  * */
-void sendCommand(byte);
+void sendCommand(uint8_t command);
+
+
 
 /*
  * @name: sendData(byte data)
@@ -41,7 +43,7 @@ void sendCommand(byte);
      TODO if this proves not correct to initialize the screen I will come back and make one where data is transmitted and CS stays low the entire time
      // looking at other examples of the driver it looks like some keep CS low the entire data transfer of LUT and others don't, ie let it toggle.
 */
-
+void sendData(uint8_t data);
 
 
 void main(void)
@@ -49,6 +51,18 @@ void main(void)
 	WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;		// stop watchdog timer
 
 	__enable_interrupts();
+
+	initEpaper();
+
+	uint16_t i = 0;
+
+	while(1){
+	sendCommand(0xAA);
+	for(i = 0; i< 1000; i++);
+	sendData(0xBB);
+    for(i = 0; i< 1000; i++);
+	}
+
 }
 
 #define LAUNCHPAD_FW
@@ -73,6 +87,8 @@ void initEpaper(void){
     EUSCI_B3_SPI->CTLW0 |= UCSWRST; // set to a 1, unlock
     EUSCI_B3_SPI->CTLW0 &= ~(UCCKPH | UCCKPL | UC7BIT | UCMODE0   ); // polarity:0, phase:0, 8 bits, spi mode (vs i2c)
     EUSCI_B3_SPI->CTLW0 |= (UCMSB | UCMST |  UCSYNC | UCSSEL__SMCLK); // MSB, master, sync (vs uart), system clock : 3Mhz
+    //TODO: think about using defines like #define CS_PIN   (BIT0) so I don't have to write so much code twice
+    //maybe to make better you could use a define for pins and just redefine depending on what you're doing ie LaunchPad or the PCB
 
     //configure the pins
     P7SEL0 &=~(BIT1 | BIT2);        // busy and reset
@@ -106,5 +122,19 @@ void initEpaper(void){
 }
 #endif
 
+void sendCommand(uint8_t command){
+    P10OUT &= ~BIT0;     // D/C
+    P10OUT &= ~BIT3;     // CS
+    EUSCI_B3_SPI->TXBUF = command;
+    P10OUT |= BIT3;
+}
+
+void sendData(uint8_t data){
+    P10OUT |=   BIT0;     // D/C
+    P10OUT &= ~BIT3;     // CS
+    EUSCI_B3_SPI->TXBUF = data;
+    P10OUT |= BIT3;
+
+}
 
 
