@@ -110,27 +110,40 @@ void main(void)
 
 	initEpaper();
 
-	clearFrameMemory(0xFF); /// we are getting stuck in the while loop checking busy line here.
+	clearFrameMemory(0x66); /// we are getting stuck in the while loop checking busy line here.
 	//0x3b command because the phase was wrong! for spi config
 	sendToDisplay();
 
-    clearFrameMemory(0xFF);
+    clearFrameMemory(0x66);
     sendToDisplay();
-
-	setFrameMemory(IMAGE_DATA);
+#define image
+#ifdef image
+	setFrameMemory(KEVIN_RULES);
 	sendToDisplay();
-
+    setFrameMemory(KEVIN_RULES);
+    sendToDisplay();
+    while(1);
+#endif
 	uint32_t i = 0;
+
+#ifdef loop
 	while(1){
 	//sendCommand(0xAA);
 	//for(i = 0; i< 200; i++);
 	//sendData(0xBB);
     for(i = 0; i< 20000; i++);
-	    setFrameMemory(IMAGE_DATA);
-	    sendToDisplay();
+    clearFrameMemory(0xE1);
+    sendToDisplay();
+    clearFrameMemory(0xE1);
+    sendToDisplay();
 
+    for(i = 0; i< 20000; i++);
+    clearFrameMemory(0xFF);
+    sendToDisplay();
+    clearFrameMemory(0xFF);
+    sendToDisplay();
 	}
-
+#endif
 }
 
 /*============================================================================================================*/
@@ -470,7 +483,7 @@ void setLUT(const unsigned char* lut){
 void waitNotBusy(){
 
     uint8_t check = P7IN & BIT2;
-    while(check);
+    while(P7IN & BIT2);
 
 }
 
