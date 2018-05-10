@@ -1,7 +1,3 @@
-
-#include "msp.h"
-#include "ePaper.h"
-
 /*
  * main.c
  * Author: Kevin Kuwata
@@ -11,6 +7,8 @@
  * This means that the pins for the ePaper are going to be the pins that are readily available on the launchpad and not the PCB.
  * Differentiate which code by using the #defines PCB_FW and Launchpad_FW
  */
+#include "msp.h"
+#include "ePaper.h"
 
 
 /*
@@ -46,6 +44,49 @@ void sendCommand(uint8_t command);
 void sendData(uint8_t data);
 
 
+
+/*
+ * @name: setMemoryArea(uint8_t x_start, uint8_t y_start, uint8_t x_end, uint8_t y_end)
+ * @brief: writes to the specified memory area ( x,y) start, and (xy) end
+ * @inputs: x, y start, and xy end, consult an image of the specified area of the graphics display from data sheet
+ * */
+void setMemoryArea(uint8_t x_start, uint8_t y_start, uint8_t x_end, uint8_t y_end);
+
+
+/*  @name: setMemoryPointer(uint8_t x, uint8_t y);
+ *  @brief: sets the start location in memory
+ *  @inputs: x, y starting location
+ *
+ * */
+void setMemoryPointer(uint8_t x, uint8_t y);
+
+
+
+/*
+ * @name: void clearFrameMemory(unsigned char color) {
+ * @brief: writes to the RAM by choosing a color, black or white, 1 or 0.
+ * @inputs: color: 1 or 0
+ * */
+void clearFrameMemory(unsigned char color) ;
+
+
+/*
+ *  @name: sendToDisplay()
+ *  @brief: you must call this after updating the RAM otherwise nothing will be pushed to the display
+ *  @inputs: none
+ * */
+void sendToDisplay(void);
+
+
+/*
+ *  @name: void waitNotBusy(void)
+ *  @brief: checks the busy pin with a Port Read, holds us in a while loop until busy pin goes low.
+ *  @input: none
+ * */
+void waitNotBusy(void);
+
+
+
 void main(void)
 {
 	WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;		// stop watchdog timer
@@ -54,7 +95,8 @@ void main(void)
 
 	initEpaper();
 
-	uint16_t i = 0;
+	clearFrameMemory(1);
+	sendToDisplay();
 
 	while(1){
 	//sendCommand(0xAA);
@@ -134,6 +176,12 @@ void initEpaper(void){
     sendData((LCD_VERTICAL_MAX - 1) & 0xFF); // Thanks Yehui from Waveshare!
     sendData(((LCD_HORIZONTAL_MAX - 1) >> 8) & 0xFF);// Thanks Yehui from Waveshare!
     sendCommand(0x00);
+
+    sendCommand(CMD_BOOSTER_SOFT_START_CONTROL);
+    sendData(0xD7);
+    sendData(0xD6);
+    sendData(0x9D);
+
     //set scan frequency 50hz
     sendCommand(CMD_DUMMY_LINE); //dummy line wdith
     sendData(0x1B); // default value
@@ -171,10 +219,14 @@ void initEpaper(void){
    sendData(0xC7); // note from datasheet
    sendData(0x00);
 
+
+
+
+
    //image data download!
    sendCommand(CMD_WRITE_RAM);
    uint16_t fillBlankCount = 0;
-   for(fillBlankCount = 0; fillBlankCount < 2000; fillBlankCount++){
+   for(fillBlankCount = 0; fillBlankCount < 200 / 8* 200; fillBlankCount++){
        sendData(WHITE);
    }
 
@@ -186,7 +238,7 @@ void initEpaper(void){
    sendCommand(CMD_MASTER_ACTV);
 
    //wait until not busy, or when busy pin goes LOW
-   while(P7IN&BIT2);
+  // while(P7IN&BIT2);
    sendCommand(CMD_DEEP_SLEEP);
    sendData(0x01); //note specified by datasheet
 
@@ -194,6 +246,50 @@ void initEpaper(void){
 
 }
 #endif
+
+void setMemoryArea(uint8_t x_start, uint8_t y_start, uint8_t x_end, uint8_t y_end){
+    sendCommand(CMD_X_ADDR_START);
+    sendData((x_start >> 3) & 0xFF);
+    sendData((x_end >> 3) & 0xFF);
+        sendCommand(CMD_Y_ADDR_START);
+         sendData(y_start & 0xFF);
+         sendData((y_start >> 8) & 0xFF);
+         sendData(y_end & 0xFF);
+         sendData((y_end >> 8) & 0xFF);
+
+         waitNotBusy();
+         //wait for busy line... but busy line never goes low!
+}
+
+void setMemoryPointer(uint8_t x, uint8_t y){
+    sendCommand(CMD_X_COUNTER);
+    sendData((x >> 3) & 0xFF);
+    sendCommand(CMD_Y_COUNTER);
+    sendData(y & 0xFF);
+    sendData((y >> 8) & 0xFF);
+    waitNotBusy();
+}
+
+void clearFrameMemory(unsigned char color) {
+    setMemoryArea(0, 0, LCD_HORIZONTAL_MAX, LCD_VERTICAL_MAX);
+    setMemoryPointer(0, 0);
+    sendCommand(CMD_WRITE_RAM);
+    /* send the color data */
+    uint8_t i;
+    for (i = 0; i < LCD_HORIZONTAL_MAX / 8 * LCD_VERTICAL_MAX; i++) {
+        sendData(color);
+    }
+}
+
+void sendToDisplay(){
+
+    sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
+    sendData(0xC4);
+    sendCommand(CMD_MASTER_ACTV);
+    sendCommand(CMD_NOP);
+
+   waitNotBusy();
+}
 
 void sendCommand(uint8_t command){
     while(EUSCI_B3_SPI->IFG & UCTXIFG);
@@ -211,7 +307,16 @@ void sendData(uint8_t data){
     P10OUT |= BIT3;
 }
 
-/**/
+
+void waitNotBusy(){
+    while(P7IN & BIT2);
+}
+
+
+/* ================================================================ */
+//                              ISRs
+/* ================================================================ */
+/* ================================================================ */
 
 void EUSCIB3_IRQHandler(void)
 {
