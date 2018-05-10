@@ -76,6 +76,13 @@ void clearFrameMemory(unsigned char color) ;
 
 
 /*
+ * @name: setFrameMemory(const unsigned char*);
+ * @brief: loads wave share default image
+ * @input constant unsigned char array (pixel data)
+ * */
+void setFrameMemory(const unsigned char* image_buffer);
+
+/*
  *  @name: sendToDisplay()
  *  @brief: you must call this after updating the RAM otherwise nothing will be pushed to the display
  *  @inputs: none
@@ -103,18 +110,25 @@ void main(void)
 
 	initEpaper();
 
-	clearFrameMemory(0x00); /// we are getting stuck in the while loop checking busy line here.
-	// busy line goes high after 0x3b command, set gate period!?!
+	clearFrameMemory(0xFF); /// we are getting stuck in the while loop checking busy line here.
+	//0x3b command because the phase was wrong! for spi config
 	sendToDisplay();
 
+    clearFrameMemory(0xFF);
+    sendToDisplay();
 
+	setFrameMemory(IMAGE_DATA);
+	sendToDisplay();
 
-
+	uint32_t i = 0;
 	while(1){
 	//sendCommand(0xAA);
 	//for(i = 0; i< 200; i++);
 	//sendData(0xBB);
-   // for(i = 0; i< 200; i++);
+    for(i = 0; i< 20000; i++);
+	    setFrameMemory(IMAGE_DATA);
+	    sendToDisplay();
+
 	}
 
 }
@@ -393,6 +407,18 @@ void setMemoryPointer(uint8_t x, uint8_t y){
     sendData((y >> 8) & 0xFF);
     waitNotBusy();
 }
+
+void setFrameMemory(const unsigned char* image_buffer){
+        setMemoryArea(0, 0, LCD_HORIZONTAL_MAX- 1, LCD_VERTICAL_MAX - 1);
+        setMemoryPointer(0, 0);
+        sendCommand(CMD_WRITE_RAM);
+        /* send the image data */
+        uint16_t i = 0;
+        for (i = 0; i < (200 / 8 ) * 200; i++) {
+            sendData(image_buffer[i]);
+        }
+}
+
 
 void clearFrameMemory(unsigned char color) {
     setMemoryArea(0, 0, LCD_HORIZONTAL_MAX, LCD_VERTICAL_MAX);
