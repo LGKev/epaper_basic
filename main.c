@@ -43,7 +43,12 @@ void sendCommand(uint8_t command);
 */
 void sendData(uint8_t data);
 
-
+/*
+ *  @name: void setLut(const unsigned char* lut)
+ *  @brief: sends the look up table (LUT) to ePaper
+ *  @input: partial or full update LUT ** provided by venord **
+ * */
+void setLUT(const unsigned char* lut);
 
 /*
  * @name: setMemoryArea(uint8_t x_start, uint8_t y_start, uint8_t x_end, uint8_t y_end)
@@ -85,6 +90,11 @@ void sendToDisplay(void);
  * */
 void waitNotBusy(void);
 
+/* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == *//* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == */
+/* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == *//* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == */
+//                                                          MAIN.c
+/* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == *//* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == */
+//* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == *//* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == */
 
 
 void main(void)
@@ -95,8 +105,11 @@ void main(void)
 
 	initEpaper();
 
-	clearFrameMemory(1);
+	clearFrameMemory(0xFF);
 	sendToDisplay();
+
+    clearFrameMemory(0xFF);
+    sendToDisplay();
 
 	while(1){
 	//sendCommand(0xAA);
@@ -106,6 +119,10 @@ void main(void)
 	}
 
 }
+
+/*============================================================================================================*/
+/*============================================================================================================*/
+/*============================================================================================================*/
 
 #define LAUNCHPAD_FW
 #ifdef LAUNCHPAD_FW
@@ -124,6 +141,73 @@ void main(void)
  *  clock is low when idle
  *  master only, and STE is not used
  * */
+#define PORT_INIT
+#ifdef PORT_INIT
+void initEpaper(void){
+    EUSCI_B3_SPI->CTLW0 |= UCSWRST; // set to a 1, unlock
+       EUSCI_B3_SPI->CTLW0 &= ~(UCCKPH | UCCKPL | UC7BIT | UCMODE0   ); // polarity:0, phase:0, 8 bits, spi mode (vs i2c)
+       EUSCI_B3_SPI->CTLW0 |= (UCMSB | UCMST |  UCSYNC | UCSSEL__SMCLK); // MSB, master, sync (vs uart), system clock : 3Mhz
+       //configure the pins
+          P7SEL0 &=~(BIT1 | BIT2);        // busy and reset
+          P7SEL1  &= ~(BIT1 | BIT2);
+
+          P10SEL0 &=~(BIT0 | BIT3); // D/C and CS
+          P10SEL1 &=~(BIT0 | BIT3);
+
+          P10SEL0 |= (BIT1 | BIT2); //primary mode for MISO and SCK
+          P10SEL1 &= ~(BIT1 | BIT2);
+
+          P7DIR &= ~(BIT2); //busy is an input
+          P7DIR |= BIT1;
+          P10DIR |= BIT0 | BIT1 | BIT2 | BIT3;
+
+          P10OUT |= (BIT0 | BIT1 | BIT2 | BIT3); // set all high according to data sheet 21/29 good display
+          P7OUT &= ~(BIT2);   //busy is active high!
+          P7OUT |= (BIT1);      //reset is active low!
+
+          //may need pull down resistor on the Busy pin, and pull up on the RESET
+
+          //TODO: prescaler if too fast for display, the waveshare code transmits at 2Mhz
+          //EUSCI_B3->BRW |= 1; // default reset value is 0... odd.
+
+          EUSCI_B3_SPI->CTLW0 &= ~UCSWRST; // set to a 0 lock
+
+          //enable interrupt for the TX
+          EUSCI_B3_SPI ->IFG = 0;     //clear any interrupts
+          EUSCI_B3_SPI -> IE |= UCTXIE;
+
+          NVIC_EnableIRQ(EUSCIB3_IRQn);
+
+
+          //ePaper Init Sequence
+              sendCommand(CMD_DRIVER_OUTPUT_CONTROL);
+              sendData((LCD_VERTICAL_MAX - 1) & 0xFF);
+              sendData(((LCD_HORIZONTAL_MAX - 1) >> 8) & 0xFF);
+              sendData(0x00);                     // GD = 0; SM = 0; TB = 0;
+              sendCommand(CMD_BOOSTER_SOFT_START_CONTROL);
+              sendData(0xD7);
+              sendData(0xD6);
+              sendData(0x9D);
+              sendCommand(CMD_VCOM);
+              sendData(0xA8);                     // VCOM 7C
+              sendCommand(CMD_DUMMY_LINE);
+              sendData(0x1A);                     // 4 dummy lines per gate
+              sendCommand(CMD_GATE_TIME);
+              sendData(0x08);                     // 2us per line
+              sendCommand(CMD_DATA_ENTRY);
+              sendData(0x03);                     // X increment; Y increment
+
+              //send LUT
+              setLUT(lut_full_update);
+
+}
+#endif
+
+
+
+
+//#define DATASHEET_INIT
+#ifdef DATASHEET_INIT
 void initEpaper(void){
 
     EUSCI_B3_SPI->CTLW0 |= UCSWRST; // set to a 1, unlock
@@ -247,6 +331,8 @@ void initEpaper(void){
 }
 #endif
 
+#endif
+
 void setMemoryArea(uint8_t x_start, uint8_t y_start, uint8_t x_end, uint8_t y_end){
     sendCommand(CMD_X_ADDR_START);
     sendData((x_start >> 3) & 0xFF);
@@ -305,6 +391,14 @@ void sendData(uint8_t data){
     P10OUT &= ~BIT3;     // CS
     EUSCI_B3_SPI->TXBUF = data;
     P10OUT |= BIT3;
+}
+
+void setLUT(const unsigned char* lut){
+    sendCommand(CMD_WRITE_LUT);
+    uint8_t i = 0;
+    for(i = 0; i< 30; i++){
+        sendData(lut[i]);
+    }
 }
 
 
