@@ -95,8 +95,6 @@ void waitNotBusy(void);
 //                                                          MAIN.c
 /* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == *//* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == */
 //* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == *//* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == */
-
-
 void main(void)
 {
 	WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;		// stop watchdog timer
@@ -105,11 +103,12 @@ void main(void)
 
 	initEpaper();
 
-	clearFrameMemory(0xFF);
+	clearFrameMemory(0x00); /// we are getting stuck in the while loop checking busy line here.
+	// busy line goes high after 0x3b command, set gate period!?!
 	sendToDisplay();
 
-    clearFrameMemory(0xFF);
-    sendToDisplay();
+
+
 
 	while(1){
 	//sendCommand(0xAA);
@@ -145,11 +144,45 @@ void main(void)
 #ifdef PORT_INIT
 void initEpaper(void){
     EUSCI_B3_SPI->CTLW0 |= UCSWRST; // set to a 1, unlock
-       EUSCI_B3_SPI->CTLW0 &= ~(UCCKPH | UCCKPL | UC7BIT | UCMODE0   ); // polarity:0, phase:0, 8 bits, spi mode (vs i2c)
-       EUSCI_B3_SPI->CTLW0 |= (UCMSB | UCMST |  UCSYNC | UCSSEL__SMCLK); // MSB, master, sync (vs uart), system clock : 3Mhz
+       EUSCI_B3_SPI->CTLW0 &= ~(UCCKPL  | UC7BIT | UCMODE0   ); // polarity:0, phase:0, 8 bits, spi mode (vs i2c)
+       EUSCI_B3_SPI->CTLW0 |= (UCCKPH | UCMSB | UCMST |  UCSYNC | UCSSEL__SMCLK); // MSB, master, sync (vs uart), system clock : 3Mhz
+
+       /* NOTE:
+        * very interesting. I am monitoring with a Logic Analyzer (LA) for the arduino code.
+        *       the settings:   MSB, 8 bits, clock polarity is 0, low when idle
+        *                           DATA valid on leading edge,
+        *                           enable line is active low.
+        *    The code appears to be talking to the display (changes color).
+        *    Busy line goes high at 0x20 command
+        *
+        *   But when I use these same settings for the SPI hardware on the MSP
+        *   I get the busy line going high in the middle randomly suggesting that the chip is getting a command incorrectly.
+        *   I then change the polarity to 1 or data shifted out on the "falling edge" (figure 23-4) and the busy line seemed to
+        *   behave correctly, not going high unitl command:0x4E which is the CMD_X_Counter command....
+        *
+        *
+        *   BUT WHEN I CHANGE THIS I have to change the settings in the LA, which doesn't make sense. there is a conflict.
+        *   I should be able to communicate the exact same way and not change the LA to see decoding.
+        *
+        *   so i know that we want the clock to be LOW when idle. meaning looking at figure 23-4 tech ref
+        *   the only options are the first one or the 3rd one with phase 1.
+        *
+        *   so now i don't have to change the logic analyzer and the busy line goes high at 0x20 command!!!
+        *
+        *   the next issue is the why the send data isn't sending data. >>> ioverflow, too small of type, u8t vs u16t. fixed it.
+        *
+        *
+        *
+        * */
+
+
        //configure the pins
           P7SEL0 &=~(BIT1 | BIT2);        // busy and reset
           P7SEL1  &= ~(BIT1 | BIT2);
+
+          //pull down on BUSY
+          P7REN |= BIT2;
+          P7OUT &= ~BIT2; // pulldown
 
           P10SEL0 &=~(BIT0 | BIT3); // D/C and CS
           P10SEL1 &=~(BIT0 | BIT3);
@@ -168,7 +201,7 @@ void initEpaper(void){
           //may need pull down resistor on the Busy pin, and pull up on the RESET
 
           //TODO: prescaler if too fast for display, the waveshare code transmits at 2Mhz
-          //EUSCI_B3->BRW |= 1; // default reset value is 0... odd.
+      //    EUSCI_B3->BRW |= BIT1; // default reset value is 0... odd.
 
           EUSCI_B3_SPI->CTLW0 &= ~UCSWRST; // set to a 0 lock
 
@@ -177,7 +210,12 @@ void initEpaper(void){
           EUSCI_B3_SPI -> IE |= UCTXIE;
 
           NVIC_EnableIRQ(EUSCIB3_IRQn);
-
+          //reset epaper 10ms
+          uint16_t delay = 0;
+          P7OUT &=~BIT1;
+          for(delay = 0; delay < 12000; delay++);
+          P7OUT |= BIT1;
+          for(delay = 0; delay < 12000; delay++); //double check with LA to see if equal or greater than 10mS
 
           //ePaper Init Sequence
               sendCommand(CMD_DRIVER_OUTPUT_CONTROL);
@@ -192,7 +230,7 @@ void initEpaper(void){
               sendData(0xA8);                     // VCOM 7C
               sendCommand(CMD_DUMMY_LINE);
               sendData(0x1A);                     // 4 dummy lines per gate
-              sendCommand(CMD_GATE_TIME);
+              sendCommand(CMD_GATE_TIME); // the busy line is being set high here.
               sendData(0x08);                     // 2us per line
               sendCommand(CMD_DATA_ENTRY);
               sendData(0x03);                     // X increment; Y increment
@@ -331,19 +369,19 @@ void initEpaper(void){
 }
 #endif
 
-#endif
+#endif //launchpad firmware
 
 void setMemoryArea(uint8_t x_start, uint8_t y_start, uint8_t x_end, uint8_t y_end){
     sendCommand(CMD_X_ADDR_START);
     sendData((x_start >> 3) & 0xFF);
-    sendData((x_end >> 3) & 0xFF);
+    sendData((x_end >> 3) & 0xFF); //>>3 is div 8!
         sendCommand(CMD_Y_ADDR_START);
          sendData(y_start & 0xFF);
          sendData((y_start >> 8) & 0xFF);
          sendData(y_end & 0xFF);
          sendData((y_end >> 8) & 0xFF);
 
-         waitNotBusy();
+         waitNotBusy(); //we get stuck right here. TODO: why do we get stuck after this command? 0x45 start y address
          //wait for busy line... but busy line never goes low!
 }
 
@@ -361,9 +399,10 @@ void clearFrameMemory(unsigned char color) {
     setMemoryPointer(0, 0);
     sendCommand(CMD_WRITE_RAM);
     /* send the color data */
-    uint8_t i;
-    for (i = 0; i < LCD_HORIZONTAL_MAX / 8 * LCD_VERTICAL_MAX; i++) {
-        sendData(color);
+    uint16_t i =0;
+ for (i = 0; i < ((200/8)*200); i++) {
+    //for(i=0; i<200; i++)
+    sendData(color);
     }
 }
 
@@ -403,7 +442,10 @@ void setLUT(const unsigned char* lut){
 
 
 void waitNotBusy(){
-    while(P7IN & BIT2);
+
+    uint8_t check = P7IN & BIT2;
+    while(check);
+
 }
 
 
@@ -415,7 +457,7 @@ void waitNotBusy(){
 void EUSCIB3_IRQHandler(void)
 {
     if(EUSCI_B3_SPI->IFG & EUSCI_B_IFG_TXIFG){
-        EUSCI_B3_SPI->IFG &=~ EUSCI_B_IFG_TXIFG;
+        EUSCI_B3_SPI->IFG &= ~EUSCI_B_IFG_TXIFG;
     }
 }
 
