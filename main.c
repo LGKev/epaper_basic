@@ -272,52 +272,101 @@ void main(void)
         for(i = 0; i< 2000; i++);
     }
 #endif
-
-#ifdef loop
-	while(1){
-	//sendCommand(0xAA);
-	//for(i = 0; i< 200; i++);
-	//sendData(0xBB);
-    for(i = 0; i< 20000; i++);
-    clearFrameMemory(0xE1);
-    sendToDisplay();
-    clearFrameMemory(0xE1);
-    sendToDisplay();
-
-    for(i = 0; i< 20000; i++);
-    clearFrameMemory(0xFF);
-    sendToDisplay();
-    clearFrameMemory(0xFF);
-    sendToDisplay();
-	}
-#endif
 }
 
-/*============================================================================================================*/
-/*============================================================================================================*/
-/*============================================================================================================*/
 
-#define LAUNCHPAD_FW
+
+ void setMemoryArea(uint8_t x_start, uint8_t y_start, uint8_t x_end, uint8_t y_end){
+         sendCommand(CMD_X_ADDR_START);
+         sendData((x_start >> 3) & 0xFF);
+         sendData((x_end >> 3) & 0xFF); //>>3 is div 8!
+
+         sendCommand(CMD_Y_ADDR_START);
+         sendData(y_start & 0xFF);
+         sendData((y_start >> 8) & 0xFF);
+         sendData(y_end & 0xFF);
+         sendData((y_end >> 8) & 0xFF);
+
+         waitNotBusy(); //we get stuck right here. TODO: why do we get stuck after this command? 0x45 start y address
+          //wait for busy line... but busy line never goes low!
+ }
+
+ void setMemoryPointer(uint8_t x, uint8_t y){
+         sendCommand(CMD_X_COUNTER);
+         sendData((x >> 3) & 0xFF);
+
+         sendCommand(CMD_Y_COUNTER);
+         sendData(y & 0xFF);
+         sendData((y >> 8) & 0xFF);
+         waitNotBusy();
+ }
+
+ void setFrameMemory(const unsigned char* image_buffer){
+         setMemoryArea(0, 0, LCD_HORIZONTAL_MAX- 1, LCD_VERTICAL_MAX - 1);
+         setMemoryPointer(0, 0);
+         sendCommand(CMD_WRITE_RAM);
+         /* send the image data */
+         uint16_t i = 0;
+         for (i = 0; i < (200 / 8 ) * 200; i++) {
+             sendData(image_buffer[i]);
+         }
+ }
+
+
+ void clearFrameMemory(unsigned char color) {
+     setMemoryArea(0, 0, LCD_HORIZONTAL_MAX, LCD_VERTICAL_MAX);
+     setMemoryPointer(0, 0);
+     sendCommand(CMD_WRITE_RAM);
+     /* send the color data */
+     uint16_t i =0;
+  for (i = 0; i < ((200/8)*200); i++) {
+     //for(i=0; i<200; i++)
+     sendData(color);
+     }
+ }
+
+ void sendToDisplay(){
+
+     sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
+     sendData(0xC4);
+     sendCommand(CMD_MASTER_ACTV);
+     sendCommand(CMD_NOP);
+
+    waitNotBusy();
+ }
+
+ void setLUT(const unsigned char* lut){
+     sendCommand(CMD_WRITE_LUT);
+     uint8_t i = 0;
+     for(i = 0; i< 30; i++){
+         sendData(lut[i]);
+     }
+ }
+
+
+/*============================================================================================================*/
+/*============================================================================================================*/
+/*============================================================================================================*/
+//#define LAUNCHPAD_FW
 #ifdef LAUNCHPAD_FW
 /*
- *  Port 10 for the launchpad
- *  GPIO    10.0        =        Data Command pin, Data is HIGH     == Green Ch5 on Logic Analyzer (LA)
- *  PRIMARY    10.1        =        SCK        ==          yellow wire connected to channel 3 on Logic Analyzer
- *  PRIMARY    10.2        =       MISO        ==      BLUE - logic analyzer Ch. 8
- *  GPIO    10.3        =       CS      ==  ORANGE, channel 4 on Logic analyzer
+ *  Port 10 for the LaunchPad
+ *  GPIO        10.0        =        Data Command pin, Data is HIGH     == Green Ch5 on Logic Analyzer (LA)
+ *  PRIMARY     10.1        =        SCK         ==          yellow wire connected to channel 3 on Logic Analyzer
+ *  PRIMARY     10.2        =        MISO        ==          BLUE - logic analyzer Ch. 8
+ *  GPIO        10.3        =        CS          ==          ORANGE, channel 4 on Logic analyzer
  *
- *  GPIO 7.1    =   ePaper RESET    =   WHITE, CH7 LA //NOTE active LOW
- *  GPIO 7.2    = ePaper BUSY        =  PURPLE, CH4   //NOTE active HIGH
+ *  GPIO 7.1    =   ePaper RESET     =      WHITE, CH7 LA //NOTE active LOW
+ *  GPIO 7.2    = ePaper BUSY        =      PURPLE, CH4   //NOTE active HIGH
  *
  *  SPI module on UCB3
  *  Polarity: rising edge
  *  clock is low when idle
  *  master only, and STE is not used
- * */
-#define PORT_INIT
-#ifdef PORT_INIT
+ */
+
 void initEpaper(void){
-    EUSCI_B3_SPI->CTLW0 |= UCSWRST; // set to a 1, unlock
+       EUSCI_B3_SPI->CTLW0 |= UCSWRST; // set to a 1, unlock
        EUSCI_B3_SPI->CTLW0 &= ~(UCCKPL  | UC7BIT | UCMODE0   ); // polarity:0, phase:0, 8 bits, spi mode (vs i2c)
        EUSCI_B3_SPI->CTLW0 |= (UCCKPH | UCMSB | UCMST |  UCSYNC | UCSSEL__SMCLK); // MSB, master, sync (vs uart), system clock : 3Mhz
 
@@ -413,8 +462,216 @@ void initEpaper(void){
               setLUT(lut_full_update);
 
 }
-#endif
 
+void sendCommand(uint8_t command){
+    while(EUSCI_B3_SPI->IFG & UCTXIFG);
+    P10OUT &= ~BIT0;     // D/C
+    P10OUT &= ~BIT3;     // CS
+    EUSCI_B3_SPI->TXBUF = command;
+    P10OUT |= BIT3;
+}
+
+void sendData(uint8_t data){
+    while(EUSCI_B3_SPI->IFG & UCTXIFG);
+    P10OUT |=   BIT0;     // D/C
+    P10OUT &= ~BIT3;     // CS
+    EUSCI_B3_SPI->TXBUF = data;
+    P10OUT |= BIT3;
+}
+
+void waitNotBusy(){
+
+    uint8_t check = P7IN & BIT2;
+    while(P7IN & BIT2);
+
+}
+
+
+/* ================================================================ */
+//                              ISRs
+/* ================================================================ */
+/* ================================================================ */
+
+void EUSCIB3_IRQHandler(void)
+{
+    if(EUSCI_B3_SPI->IFG & EUSCI_B_IFG_TXIFG){
+        EUSCI_B3_SPI->IFG &= ~EUSCI_B_IFG_TXIFG;
+    }
+}
+
+#endif //END OF LAUNCHPAD FIRMWARE
+
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+
+#define PCB_FIRMWARE
+#ifdef PCB_FIRMWARE
+/*
+ *  Port 3 for the PCB
+ *  GPIO        3.0         =        D/C         ==             //HIGH = Data
+ *  GPIO        3.2         =        CS
+ *  PRIMARY     3.1         =        SCK         ==
+ *  PRIMARY     3.3         =        MOSI        ==
+ *
+ *  GPIO        7.7         =    ePaper RESET    ==
+ *  GPIO        8.1         =    ePaper BUSY     ==
+ *
+ *  SPI module on UA2
+ *  Polarity: rising edge
+ *  Clock Phase: !!! Curcial, has  to be set as the third option in the Tech Ref, this was what was causing all the problems. I arrived at this conclusion after looking at what the idle states had to be. only 2 options that made idle LOW.
+ *          Tech Ref 23.4
+ *  clock is low when idle
+ *  master only, and STE is not used
+ * */
+
+void initEpaper(void){
+       EUSCI_A2_SPI->CTLW0 |= UCSWRST; // set to a 1, unlock
+       EUSCI_A2_SPI->CTLW0 &= ~(UCCKPL  | UC7BIT | UCMODE0   ); // polarity:0, phase:0, 8 bits, spi mode (vs i2c)
+       EUSCI_A2_SPI->CTLW0 |= (UCCKPH | UCMSB | UCMST |  UCSYNC | UCSSEL__SMCLK); // MSB, master, sync (vs uart), system clock : 3Mhz
+
+       /* NOTE:
+        * very interesting. I am monitoring with a Logic Analyzer (LA) for the arduino code.
+        *       the settings:   MSB, 8 bits, clock polarity is 0, low when idle
+        *                           DATA valid on leading edge,
+        *                           enable line is active low.
+        *    The code appears to be talking to the display (changes color).
+        *    Busy line goes high at 0x20 command
+        *
+        *   But when I use these same settings for the SPI hardware on the MSP
+        *   I get the busy line going high in the middle randomly suggesting that the chip is getting a command incorrectly.
+        *   I then change the polarity to 1 or data shifted out on the "falling edge" (figure 23-4) and the busy line seemed to
+        *   behave correctly, not going high unitl command:0x4E which is the CMD_X_Counter command....
+        *
+        *
+        *   BUT WHEN I CHANGE THIS I have to change the settings in the LA, which doesn't make sense. there is a conflict.
+        *   I should be able to communicate the exact same way and not change the LA to see decoding.
+        *
+        *   so i know that we want the clock to be LOW when idle. meaning looking at figure 23-4 tech ref
+        *   the only options are the first one or the 3rd one with phase 1.
+        *
+        *   so now i don't have to change the logic analyzer and the busy line goes high at 0x20 command!!!
+        *
+        *   the next issue is the why the send data isn't sending data. >>> ioverflow, too small of type, u8t vs u16t. fixed it.
+        *
+        *
+        *
+        * */
+
+
+       //configure the pins
+          P7SEL0 &=~(BIT7);        // reset 7.7
+          P7SEL1  &= ~(BIT7);
+
+          P8SEL0 &=~(BIT1);        // busy 8.1
+          P8SEL1  &= ~(BIT1);
+
+          //pull down on BUSY
+          P8REN |= BIT1;
+          P8OUT &= ~BIT1; // pulldown
+
+          P3SEL0 &=~(BIT0 | BIT2); // D/C (3.0) and CS(3.2)
+          P3SEL1 &=~(BIT0 | BIT2);
+
+          P3SEL0 |= (BIT3 | BIT1); //primary mode for MOSI (3.3) and SCK (3.1)
+          P3SEL1 &= ~(BIT3 | BIT1);
+
+          P3DIR |= BIT0|BIT1| BIT2 | BIT3;
+          P8DIR &= ~(BIT1); //busy is an input
+          P7DIR |= BIT7;    //reset
+
+
+          P3OUT |= (BIT0 | BIT1 | BIT2 | BIT3); // set all high according to data sheet 21/29 "good display pdf"
+          P7OUT |= (BIT7);      //reset is active low!
+          P8OUT &= ~(BIT1);   //busy is active high!
+
+      //    EUSCI_B3->BRW |= BIT1; // default reset value is 0... weird. also we could change system clock to be faster so we could transfer faster than 3Mhz!
+          EUSCI_A2_SPI->CTLW0 &= ~UCSWRST; // set to a 0 lock
+
+          //enable interrupt for the TX
+          EUSCI_A2_SPI ->IFG = 0;     //clear any interrupts
+          EUSCI_A2_SPI -> IE |= UCTXIE;
+
+          NVIC_EnableIRQ(EUSCIA2_IRQn);
+
+
+          //reset epaper 10ms
+          uint16_t delay = 0;
+          P7OUT &=~BIT7;
+          for(delay = 0; delay < 12000; delay++);
+          P7OUT |= BIT7;
+          for(delay = 0; delay < 12000; delay++); //double check with LA to see if equal or greater than 10mS
+
+          //ePaper Init Sequence
+              sendCommand(CMD_DRIVER_OUTPUT_CONTROL);
+              sendData((LCD_VERTICAL_MAX - 1) & 0xFF);
+              sendData(((LCD_HORIZONTAL_MAX - 1) >> 8) & 0xFF);
+              sendData(0x00);                     // GD = 0; SM = 0; TB = 0;
+              sendCommand(CMD_BOOSTER_SOFT_START_CONTROL);
+              sendData(0xD7);
+              sendData(0xD6);
+              sendData(0x9D);
+              sendCommand(CMD_VCOM);
+              sendData(0xA8);                     // VCOM 7C
+              sendCommand(CMD_DUMMY_LINE);
+              sendData(0x1A);                     // 4 dummy lines per gate
+              sendCommand(CMD_GATE_TIME); // the busy line is being set high here.
+              sendData(0x08);                    // 2us per line
+              sendCommand(CMD_DATA_ENTRY);
+              sendData(0x03);                     // X increment; Y increment
+
+              //send LUT
+              setLUT(lut_full_update);
+
+}
+
+// these functions change depending on what the platform is: PCB or LaunchPad
+// these 3 are the only ones to change so far...
+void sendCommand(uint8_t command){
+    while(EUSCI_A2_SPI->IFG & UCTXIFG);
+    P3OUT &= ~BIT0;     // D/C
+    P3OUT &= ~BIT2;     // CS
+    EUSCI_A2_SPI->TXBUF = command;
+    P3OUT |= BIT2;
+}
+
+void sendData(uint8_t data){
+    while(EUSCI_A2_SPI->IFG & UCTXIFG);
+    P3OUT |=   BIT0;     // D/C
+    P3OUT &= ~BIT2;     // CS
+    EUSCI_B3_SPI->TXBUF = data;
+    P3OUT |= BIT2;
+}
+
+void waitNotBusy(){
+    while(P8IN & BIT1);
+}
+
+
+/* ================================================================ */
+//                              ISRs
+/* ================================================================ */
+/* ================================================================ */
+
+void EUSCIA2_IRQHandler(void)
+{
+    if(EUSCI_A2_SPI->IFG & EUSCI_A_IFG_TXIFG){
+        EUSCI_A2_SPI->IFG &= ~EUSCI_A_IFG_TXIFG;
+    }
+}
+
+#endif  //END OF PCB FIRMWARE
+
+
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
+/*&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&*/
 
 
 
@@ -542,110 +799,5 @@ void initEpaper(void){
 
 }
 #endif
-
-#endif //launchpad firmware
-
-void setMemoryArea(uint8_t x_start, uint8_t y_start, uint8_t x_end, uint8_t y_end){
-    sendCommand(CMD_X_ADDR_START);
-    sendData((x_start >> 3) & 0xFF);
-    sendData((x_end >> 3) & 0xFF); //>>3 is div 8!
-        sendCommand(CMD_Y_ADDR_START);
-         sendData(y_start & 0xFF);
-         sendData((y_start >> 8) & 0xFF);
-         sendData(y_end & 0xFF);
-         sendData((y_end >> 8) & 0xFF);
-
-         waitNotBusy(); //we get stuck right here. TODO: why do we get stuck after this command? 0x45 start y address
-         //wait for busy line... but busy line never goes low!
-}
-
-void setMemoryPointer(uint8_t x, uint8_t y){
-    sendCommand(CMD_X_COUNTER);
-    sendData((x >> 3) & 0xFF);
-    sendCommand(CMD_Y_COUNTER);
-    sendData(y & 0xFF);
-    sendData((y >> 8) & 0xFF);
-    waitNotBusy();
-}
-
-void setFrameMemory(const unsigned char* image_buffer){
-        setMemoryArea(0, 0, LCD_HORIZONTAL_MAX- 1, LCD_VERTICAL_MAX - 1);
-        setMemoryPointer(0, 0);
-        sendCommand(CMD_WRITE_RAM);
-        /* send the image data */
-        uint16_t i = 0;
-        for (i = 0; i < (200 / 8 ) * 200; i++) {
-            sendData(image_buffer[i]);
-        }
-}
-
-
-void clearFrameMemory(unsigned char color) {
-    setMemoryArea(0, 0, LCD_HORIZONTAL_MAX, LCD_VERTICAL_MAX);
-    setMemoryPointer(0, 0);
-    sendCommand(CMD_WRITE_RAM);
-    /* send the color data */
-    uint16_t i =0;
- for (i = 0; i < ((200/8)*200); i++) {
-    //for(i=0; i<200; i++)
-    sendData(color);
-    }
-}
-
-void sendToDisplay(){
-
-    sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
-    sendData(0xC4);
-    sendCommand(CMD_MASTER_ACTV);
-    sendCommand(CMD_NOP);
-
-   waitNotBusy();
-}
-
-void sendCommand(uint8_t command){
-    while(EUSCI_B3_SPI->IFG & UCTXIFG);
-    P10OUT &= ~BIT0;     // D/C
-    P10OUT &= ~BIT3;     // CS
-    EUSCI_B3_SPI->TXBUF = command;
-    P10OUT |= BIT3;
-}
-
-void sendData(uint8_t data){
-    while(EUSCI_B3_SPI->IFG & UCTXIFG);
-    P10OUT |=   BIT0;     // D/C
-    P10OUT &= ~BIT3;     // CS
-    EUSCI_B3_SPI->TXBUF = data;
-    P10OUT |= BIT3;
-}
-
-void setLUT(const unsigned char* lut){
-    sendCommand(CMD_WRITE_LUT);
-    uint8_t i = 0;
-    for(i = 0; i< 30; i++){
-        sendData(lut[i]);
-    }
-}
-
-
-void waitNotBusy(){
-
-    uint8_t check = P7IN & BIT2;
-    while(P7IN & BIT2);
-
-}
-
-
-/* ================================================================ */
-//                              ISRs
-/* ================================================================ */
-/* ================================================================ */
-
-void EUSCIB3_IRQHandler(void)
-{
-    if(EUSCI_B3_SPI->IFG & EUSCI_B_IFG_TXIFG){
-        EUSCI_B3_SPI->IFG &= ~EUSCI_B_IFG_TXIFG;
-    }
-}
-
 
 
