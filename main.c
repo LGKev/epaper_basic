@@ -234,6 +234,11 @@ void main(void)
 
 	initEpaper();
 
+	while(1){
+	    initEpaper();
+
+	}
+
 	clearFrameMemory(0xFF); /// we are getting stuck in the while loop checking busy line here.
 	//0x3b command because the phase was wrong! for spi config
 	sendToDisplay();
@@ -242,6 +247,7 @@ void main(void)
     sendToDisplay();
 
     uint32_t i = 0;
+
 
 #define image
 #ifdef image
@@ -519,6 +525,7 @@ void EUSCIB3_IRQHandler(void)
  *
  *  GPIO        7.7         =    ePaper RESET    ==
  *  GPIO        8.1         =    ePaper BUSY     ==
+ *  GPIO        8.0         =    ePaper BS1 // ties low for 4 wire spi !!! this is not required for the Breakout Board but it is for my PCB
  *
  *  SPI module on UA2
  *  Polarity: rising edge
@@ -530,44 +537,15 @@ void EUSCIB3_IRQHandler(void)
 
 void initEpaper(void){
        EUSCI_A2_SPI->CTLW0 |= UCSWRST; // set to a 1, unlock
-       EUSCI_A2_SPI->CTLW0 &= ~(UCCKPL  | UC7BIT | UCMODE0   ); // polarity:0, phase:0, 8 bits, spi mode (vs i2c)
-       EUSCI_A2_SPI->CTLW0 |= (UCCKPH | UCMSB | UCMST |  UCSYNC | UCSSEL__SMCLK); // MSB, master, sync (vs uart), system clock : 3Mhz
-
-       /* NOTE:
-        * very interesting. I am monitoring with a Logic Analyzer (LA) for the arduino code.
-        *       the settings:   MSB, 8 bits, clock polarity is 0, low when idle
-        *                           DATA valid on leading edge,
-        *                           enable line is active low.
-        *    The code appears to be talking to the display (changes color).
-        *    Busy line goes high at 0x20 command
-        *
-        *   But when I use these same settings for the SPI hardware on the MSP
-        *   I get the busy line going high in the middle randomly suggesting that the chip is getting a command incorrectly.
-        *   I then change the polarity to 1 or data shifted out on the "falling edge" (figure 23-4) and the busy line seemed to
-        *   behave correctly, not going high unitl command:0x4E which is the CMD_X_Counter command....
-        *
-        *
-        *   BUT WHEN I CHANGE THIS I have to change the settings in the LA, which doesn't make sense. there is a conflict.
-        *   I should be able to communicate the exact same way and not change the LA to see decoding.
-        *
-        *   so i know that we want the clock to be LOW when idle. meaning looking at figure 23-4 tech ref
-        *   the only options are the first one or the 3rd one with phase 1.
-        *
-        *   so now i don't have to change the logic analyzer and the busy line goes high at 0x20 command!!!
-        *
-        *   the next issue is the why the send data isn't sending data. >>> ioverflow, too small of type, u8t vs u16t. fixed it.
-        *
-        *
-        *
-        * */
-
+       EUSCI_A2_SPI->CTLW0 &= ~(UCCKPL  | UC7BIT | UCMODE0   ); // polarity:0, 8 bits, spi mode (vs i2c)
+       EUSCI_A2_SPI->CTLW0 |= (UCCKPH | UCMSB | UCMST |  UCSYNC | UCSSEL__SMCLK); // MSB, master, sync (vs uart), system clock : 3Mhz, phase: 1 Note: this was the key.
 
        //configure the pins
           P7SEL0 &=~(BIT7);        // reset 7.7
           P7SEL1  &= ~(BIT7);
 
-          P8SEL0 &=~(BIT1);        // busy 8.1
-          P8SEL1  &= ~(BIT1);
+          P8SEL0 &=~(BIT0| BIT1);        // busy 8.1,   BS1 (8.0)
+          P8SEL1  &= ~(BIT0 | BIT1);
 
           //pull down on BUSY
           P8REN |= BIT1;
@@ -580,13 +558,19 @@ void initEpaper(void){
           P3SEL1 &= ~(BIT3 | BIT1);
 
           P3DIR |= BIT0|BIT1| BIT2 | BIT3;
-          P8DIR &= ~(BIT1); //busy is an input
           P7DIR |= BIT7;    //reset
+          P8DIR |= BIT0;    //BS1
+          P8DIR &= ~(BIT1); //busy is an input
 
 
           P3OUT |= (BIT0 | BIT1 | BIT2 | BIT3); // set all high according to data sheet 21/29 "good display pdf"
           P7OUT |= (BIT7);      //reset is active low!
           P8OUT &= ~(BIT1);   //busy is active high!
+
+          //4 wire spi for ePaper (RTFM)
+          P8OUT &= ~BIT0;
+
+
 
       //    EUSCI_B3->BRW |= BIT1; // default reset value is 0... weird. also we could change system clock to be faster so we could transfer faster than 3Mhz!
           EUSCI_A2_SPI->CTLW0 &= ~UCSWRST; // set to a 0 lock
@@ -647,7 +631,7 @@ void sendData(uint8_t data){
 }
 
 void waitNotBusy(){
-    while(P8IN & BIT1);
+ //   while(P8IN & BIT1);
 }
 
 
