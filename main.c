@@ -232,12 +232,29 @@ void main(void)
 
 	__enable_interrupts();
 
-	initEpaper();
+	//initEpaper();
+
+    P9SEL0 &= ~BIT3;
+    P9SEL1 &= ~BIT3; //3.1
+
+	P3SEL0 =0;
+	P3SEL1 =0; //3.0 THROUGH 3.7
+
+	P3DIR |= 0xFF;
+    P9DIR |= BIT3; // led
+
+	P3OUT |= 0xff; // PIN 3.1 APPEARS TO BE BLOWN. DOES NOT GO HIGH OR LOW. STUCK AT LOW.
+	//yes pin 3.1 is blown. 3.0 through 3.7 all work except 3.1 THATS THE CLOCK LINE!!
+	// DO I REPLACE THE CHIP?
+	P9OUT |= BIT3;
 
 	while(1){
-	    initEpaper();
-
+	   // initEpaper();
+	 //  P3OUT |=BIT1;
+	  // P3OUT&=~BIT1;
 	}
+
+	initEpaper();
 
 	clearFrameMemory(0xFF); /// we are getting stuck in the while loop checking busy line here.
 	//0x3b command because the phase was wrong! for spi config
