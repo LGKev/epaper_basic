@@ -97,6 +97,130 @@ void sendToDisplay(void);
  * */
 void waitNotBusy(void);
 
+
+/*
+ *  NOTE
+ *  So I am trying to figure out how the process goes for displaying an image
+ *  there is a global image array of bytes which represents the entire screen
+ *      **************
+ *      *            *
+ *      *            *
+ *      *            *
+ *      *            *
+ *      *            *
+ *      *            *
+ *      **************
+ * Writing the massive array allows parts of the display to be updated without changing whats on the screen already
+ *      (this gives the impression it never updated, but  it really only updated  a portion).
+ *         I mean that instead of the entire screen flashing, only the part of the screen that changes gets cleared
+ *         and updated
+ *
+ *
+ * I am thinking of a watch face right now, maybe If i chop up the screen realestate for known values
+ * like the battery meter, bluetooth connected, and all the things that would pretty much be constant.
+ *
+ * Then the center of the screen has time and date
+ *
+ *              **REMEMBER**
+ *  Byte:     _ _ _ _     _ _ _ _
+ *     1's are off _
+ *     0's are on #
+ *            0000 0000   => ########
+ *            0001 0000   => ###_####
+ *            0001 1000   => ##__####
+ *
+ *
+ * It appears the flow is something like this:
+ *          1) create a big ass array
+ *          2) show the array to the screen (this represents the first screen)
+ *          3) update new screen _in the array!
+ *              a) clear the portion of the screen that needs to be updated
+ *                  - requires us to know what the possible things to be shown (or at least hieght and width).
+ *               b) put the pixel data into the array, know that 1 byte is 8 bits.
+ *               4) load the newest part of the array to the RAM
+ *                      a) somehow translate the array position to a position on the display
+ *                      b) have to clear out just that area which has the newest data
+ *                      c) update the ram
+ *               5) finally display the ram to the screen, put ram data to the screen.
+ *
+ *
+ *          one question I have is this row major or column major?
+ *          I know that we are X+, y+ in terms of data entry
+ *          I was reading somewhere about using a column for fonts.
+ *          a byte is 8 bits... and 8 pixels
+ *          200 pixels width
+ *              200 pexles / 8 pixels/bits is 25 (like a 200yrd lmao). so 25 bytes determine a row and but there are stil 200 rows
+ *              so how many bytes?
+ *                  25 bytes/ row * 200 is 5k bytes (that seems insane, not 5k bits?!), nah thats right cuz think of the pixel bmp to lcd conversion array, endded up to be 5000 bytes
+ *
+ *              (0,0) is the origin, I would expect that to be the 0th index, of the array
+ *              (1,0); is 1 over in the X and so do i expect that to be the 0th element ... well yea cuz its an array of bytes.
+ *                  so taht means I wouldn't expect to see index to increment until its a multiple of 8.
+ *             so
+ *             points (0,0) through (0,7) are the first byte
+ *             and points (0,0) through 25 next bytes is the first row (0,200);
+ *
+ *             so I am imaginging an array that is 25 width, and 200 height.
+ *              or a table, 25 columns, 200 rows.
+ *
+ *
+ *              lets analyze the arduino code:
+ *                          image[(x + y * this->width) / 8] |= 0x80 >> (x % 8);            translates: image[x + y*25]
+ *
+ *                               image is the global array, x and y is the coordinates of the point.
+ *                               lets say we want to light up (1,1) we would expect the index to be 0.
+ *                                  1 + 1*200 / 8 ===>  26   but goes to 25 which makes me think the origin is not top left but top right...
+ *                                          then we or with 0x80 >> (x % 8)
+ *                                          so if x is 1 1 mod 8 is 0. so we don't shift any amount.
+ *                                          0x80 is 1000 0000 in binary.
+ *
+ *                                         so or image[26] with 1000 0000 and zero shift
+ *
+ *                              what about point (25,1)?
+ *                                  I would expect the index to be 0.
+ *                                  25 + 200 / 8 so thats 50?
+ *
+ *                                 point(0,0) ==> 0/8 is 0 so index = 0; image[0]
+ *
+ *                                 point(1,0) ==> 1 + 0 so image [1] ???
+ *
+ *                                 point(2,0) ==> image[2]
+ *
+ *                                 point(0,1) ==> image[25]
+ *                                 point(0,2) == image[50]
+ *
+ *                          appears that this is using columns instead of rows.
+ *                          so we have 25 columns, that are 200 long.
+ *
+ *                          a column is a byte
+ *                          a byte is 8 bits
+ *                          a column is 8 bits.
+ *
+ *                          the 0x80 makes sense: 1000 0000
+ *                             because then the  >> is either 0, 1, .... or 7
+ *                          say the shift was 1, meaning x was a 1
+ *                          0x80 becomes 0100 0000 or 0x40 remember  >> is div 2
+ *
+ *                          x is 25???
+ *                          mod 8 is 3
+ *                          so 0x80 becomes 0x10
+ *                          1000 0000 >> >> >> 0001 000
+ *
+ *                          lets say x is 7, then 0x80 becomes 0x01
+ *                          1000 0000 >> x7 == 0000 0001 = 0x01
+ *                          image[7 + 25] = image[32]
+ *
+ *                         ######     <<< lets say # is 8 bits. we need 25 of htem to make an entire row
+ *
+ *                         how do these relate to the index?
+ *
+ *
+ *
+ *
+ *
+ * */
+
+
 /* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == *//* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == */
 /* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == *//* == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == == */
 //                                                          MAIN.c
@@ -110,21 +234,44 @@ void main(void)
 
 	initEpaper();
 
-	clearFrameMemory(0x66); /// we are getting stuck in the while loop checking busy line here.
+	clearFrameMemory(0xFF); /// we are getting stuck in the while loop checking busy line here.
 	//0x3b command because the phase was wrong! for spi config
 	sendToDisplay();
 
-    clearFrameMemory(0x66);
+    clearFrameMemory(0xFF);
     sendToDisplay();
+
+    uint32_t i = 0;
+
 #define image
 #ifdef image
-	setFrameMemory(KEVIN_RULES);
-	sendToDisplay();
-    setFrameMemory(KEVIN_RULES);
-    sendToDisplay();
-    while(1);
+
+
+
+    while(1){
+        //clearFrameMemory(0xFF);
+      //  sendToDisplay();
+       // clearFrameMemory(0xFF);
+       // sendToDisplay();
+        setFrameMemory(alarm_a);
+        sendToDisplay();
+        setFrameMemory(alarm_a);
+        sendToDisplay();
+
+         for(i = 0; i< 2000; i++);
+
+        // clearFrameMemory(0xFF);
+       //  sendToDisplay();
+       // clearFrameMemory(0xFF);
+        sendToDisplay();
+        setFrameMemory(alarm_b);
+        sendToDisplay();
+        setFrameMemory(alarm_b);
+        sendToDisplay();
+
+        for(i = 0; i< 2000; i++);
+    }
 #endif
-	uint32_t i = 0;
 
 #ifdef loop
 	while(1){
@@ -258,7 +405,7 @@ void initEpaper(void){
               sendCommand(CMD_DUMMY_LINE);
               sendData(0x1A);                     // 4 dummy lines per gate
               sendCommand(CMD_GATE_TIME); // the busy line is being set high here.
-              sendData(0x08);                     // 2us per line
+              sendData(0x08);                    // 2us per line
               sendCommand(CMD_DATA_ENTRY);
               sendData(0x03);                     // X increment; Y increment
 
